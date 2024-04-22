@@ -47,10 +47,7 @@ impl User {
         Ok((deposit_utxo, self.signer.xonly_public_key, evm_address))
     }
 
-    pub fn get_deposit_address(
-        &self,
-        evm_address: EVMAddress,
-    ) -> Result<Address,  BridgeError> {
+    pub fn get_deposit_address(&self, evm_address: EVMAddress) -> Result<Address, BridgeError> {
         let (deposit_address, _) = self
             .transaction_builder
             .generate_deposit_address(&self.signer.xonly_public_key, &evm_address)?;

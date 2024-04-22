@@ -42,30 +42,35 @@ impl ScriptBuilder {
 
     pub fn generate_script_n_of_n(&self) -> ScriptBuf {
         let mut builder = Builder::new();
+        builder = builder.push_int(self.verifiers_pks.len() as i64);
         for vpk in self.verifiers_pks.clone() {
-            builder = builder.push_x_only_key(&vpk).push_opcode(OP_CHECKSIGVERIFY);
+            builder = builder.push_x_only_key(&vpk);
         }
+        builder = builder.push_int(self.verifiers_pks.len() as i64);
         builder = builder.push_opcode(OP_TRUE);
         builder.into_script()
     }
 
-    pub fn generate_script_n_of_n_with_user_pk(&self, user_pk: &XOnlyPublicKey) -> ScriptBuf {
-        let mut builder = Builder::new();
-        for vpk in self.verifiers_pks.clone() {
-            builder = builder.push_x_only_key(&vpk).push_opcode(OP_CHECKSIGVERIFY);
-        }
-        builder = builder
-            .push_x_only_key(user_pk)
-            .push_opcode(OP_CHECKSIGVERIFY);
-        builder = builder.push_opcode(OP_TRUE);
-        builder.into_script()
-    }
+    // pub fn generate_script_n_of_n_with_user_pk(&self, user_pk: &XOnlyPublicKey) -> ScriptBuf {
+    //     let mut builder = Builder::new();
+    //     for vpk in self.verifiers_pks.clone() {
+    //         builder = builder.push_x_only_key(&vpk).push_opcode(OP_CHECKSIGVERIFY);
+    //     }
+    //     builder = builder
+    //         .push_x_only_key(user_pk)
+    //         .push_opcode(OP_CHECKSIGVERIFY);
+    //     builder = builder.push_opcode(OP_TRUE);
+    //     builder.into_script()
+    // }
 
     pub fn create_deposit_script(&self, evm_address: &EVMAddress) -> ScriptBuf {
         let mut builder = Builder::new();
+        builder = builder.push_int(self.verifiers_pks.len() as i64);
         for vpk in self.verifiers_pks.clone() {
-            builder = builder.push_x_only_key(&vpk).push_opcode(OP_CHECKSIGVERIFY);
+            builder = builder.push_x_only_key(&vpk);
         }
+        builder = builder.push_int(self.verifiers_pks.len() as i64);
+        builder = builder.push_opcode(OP_CHECKMULTISIG);
 
         builder = builder
             .push_opcode(OP_TRUE)

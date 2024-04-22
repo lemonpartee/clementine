@@ -206,6 +206,7 @@ impl Operator {
         move_signatures.reverse();
 
         let mut witness_elements: Vec<&[u8]> = Vec::new();
+        witness_elements.push(&[0u8]);
         for sig in move_signatures.iter() {
             witness_elements.push(sig.as_ref());
         }
