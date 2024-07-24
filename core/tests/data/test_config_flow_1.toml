@@ -1,7 +1,7 @@
 tracing_debug = "debug,bitcoincore_rpc=info,hyper=error"
 host = "127.0.0.1"
 port = 3000
-secret_key = "5555555555555555555555555555555555555555555555555555555555555555"
+secret_key = "184e78638bbd91d49a44f3855eab07db4095e705e4ff3e8ea0ae71e261c0a463"
 verifiers_public_keys = [
     "4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa",
     "466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27",
@@ -13,8 +13,8 @@ num_verifiers = 4
 min_relay_fee = 305
 user_takes_after = 5
 confirmation_treshold = 1
-network = "regtest"
-bitcoin_rpc_url = "http://127.0.0.1:18443"
+network = "testnet"
+bitcoin_rpc_url = "http://172.16.20.24:18443"
 bitcoin_rpc_user = "admin"
 bitcoin_rpc_password = "admin"
 all_secret_keys = [
