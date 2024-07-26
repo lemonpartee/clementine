@@ -128,6 +128,9 @@ pub enum BridgeError {
     /// There was an error while creating a server.
     #[error("ServerError")]
     ServerError(std::io::Error),
+    /// There was an error while handling I/O operations.
+    #[error("IOError")]
+    IOError(std::io::Error),
 }
 
 impl Into<ErrorObject<'static>> for BridgeError {
@@ -205,5 +208,11 @@ impl From<bitcoin::address::ParseError> for BridgeError {
 impl From<sqlx::Error> for BridgeError {
     fn from(err: sqlx::Error) -> Self {
         BridgeError::DatabaseError(err)
+    }
+}
+
+impl From<std::io::Error> for BridgeError {
+    fn from(err: std::io::Error) -> Self {
+        BridgeError::IOError(err)
     }
 }

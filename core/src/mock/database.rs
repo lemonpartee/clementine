@@ -14,18 +14,26 @@
 #[macro_export]
 macro_rules! create_test_config {
     ($db_name:expr, $config_file:expr) => {{
-        let config = common::get_test_config($config_file).unwrap();
-        let config = Database::create_database(config, &$db_name).await.unwrap();
-
-        let database = Database::new(config.clone()).await.unwrap();
+        let mut config = common::get_test_config($config_file).unwrap();
+        Database::create_database_file(&$db_name).await.unwrap();
+        let database = Database::new(&$db_name).await.unwrap();
+        // println!("Running SQL script:");
         database
             .run_sql_file("../scripts/schema.sql")
             .await
             .unwrap();
-
+        // println!("SQL script executed successfully. Closing database:");
         database.close().await;
-
+        // println!("Database closed successfully. Configuring test config:");
+        config.db_name = $db_name;
         config
+    }};
+}
+
+#[macro_export]
+macro_rules! delete_test_db {
+    ($db_name:expr) => {{
+        Database::drop_database(&$db_name).await.unwrap();
     }};
 }
 

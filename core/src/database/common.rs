@@ -4,123 +4,93 @@
 //! directly talks with PostgreSQL. It is expected that PostgreSQL is properly
 //! installed and configured.
 
+use crate::errors::BridgeError;
 use crate::EVMAddress;
-use crate::{config::BridgeConfig, errors::BridgeError};
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, OutPoint, Txid};
-use sqlx::{Pool, Postgres};
-use std::fs;
+use sqlx::{Acquire, Pool, Sqlite, SqlitePool};
+use std::fs::{self, File};
+use std::path::Path;
 use std::str::FromStr;
 
 #[derive(Clone, Debug)]
 pub struct Database {
-    connection: Pool<Postgres>,
+    connection: Pool<Sqlite>,
 }
 
 impl Database {
     /// Returns a `Database` after establishing a connection to database.
     /// Returns error if database is not available.
-    pub async fn new(config: BridgeConfig) -> Result<Self, BridgeError> {
-        let url = "postgresql://".to_owned()
-            + config.db_host.as_str()
-            + ":"
-            + config.db_port.to_string().as_str()
-            + "?dbname="
-            + config.db_name.as_str()
-            + "&user="
-            + config.db_user.as_str()
-            + "&password="
-            + config.db_password.as_str();
-        tracing::debug!("Connecting database: {}", url);
+    pub async fn new(name: &String) -> Result<Self, BridgeError> {
+        let path = format!("{}.db", name);
+        let url = format!("sqlite://{}", path);
+        println!("Connecting database: {}", url);
 
-        match sqlx::PgPool::connect(url.as_str()).await {
+        match SqlitePool::connect(url.as_str()).await {
             Ok(c) => Ok(Self { connection: c }),
             Err(e) => Err(BridgeError::DatabaseError(e)),
         }
     }
 
-    /// Closes database connection.
+    /// Closes the database connection.
     pub async fn close(&self) {
         self.connection.close().await;
     }
 
     /// Drops the given database if it exists.
-    pub async fn drop_database(
-        config: BridgeConfig,
-        database_name: &str,
-    ) -> Result<(), BridgeError> {
-        let url = "postgresql://".to_owned()
-            + config.db_user.as_str()
-            + ":"
-            + config.db_password.as_str()
-            + "@"
-            + config.db_host.as_str();
-        let conn = sqlx::PgPool::connect(url.as_str()).await?;
+    pub async fn drop_database(database_name: &str) -> Result<(), BridgeError> {
+        let path = format!("{}.db", database_name);
+        if fs::remove_file(&path).is_err() {
+            tracing::warn!("Failed to delete database file: {}", path);
+        }
+        Ok(())
+    }
 
-        let query = format!("DROP DATABASE IF EXISTS {database_name}");
-        sqlx::query(&query).execute(&conn).await?;
+    /// Creates a new database file.
+    pub async fn create_database_file(database_name: &String) -> Result<(), BridgeError> {
+        let path = format!("{}.db", database_name);
+        let url = format!("sqlite://{}", path);
+        println!("Creating database: {}", url);
 
-        conn.close().await;
+        // Check if the database file exists and create it if it does not
+        if !Path::new(&path).exists() {
+            File::create(&path).expect("Current thread failed to create database file");
+        }
 
         Ok(())
     }
 
-    /// Creates a new database with given name. A new database connection should
-    /// be established after with `Database::new(config)` call after this.
-    ///
-    /// This will drop the target database if it exist.
-    ///
-    /// Returns a new `BridgeConfig` with updated database name. Use that
-    /// `BridgeConfig` to create a new connection, using `Database::new()`.
-    pub async fn create_database(
-        config: BridgeConfig,
-        database_name: &str,
-    ) -> Result<BridgeConfig, BridgeError> {
-        let url = "postgresql://".to_owned()
-            + config.db_user.as_str()
-            + ":"
-            + config.db_password.as_str()
-            + "@"
-            + config.db_host.as_str();
-        let conn = sqlx::PgPool::connect(url.as_str()).await?;
-
-        Database::drop_database(config.clone(), database_name).await?;
-
-        let query = format!(
-            "CREATE DATABASE {} WITH OWNER {}",
-            database_name, config.db_user
-        );
-        sqlx::query(&query).execute(&conn).await?;
-
-        conn.close().await;
-
-        let config = BridgeConfig {
-            db_name: database_name.to_string(),
-            ..config
-        };
-
-        Ok(config)
-    }
-
-    /// Runs given SQL file to database. Database connection must be established
-    /// before calling this function.
+    /// Runs the given SQL file on the database.
     pub async fn run_sql_file(&self, sql_file: &str) -> Result<(), BridgeError> {
-        let contents = fs::read_to_string(sql_file).unwrap();
+        let contents = fs::read_to_string(sql_file).map_err(|e| BridgeError::IOError(e))?;
 
-        sqlx::raw_sql(contents.as_str())
-            .execute(&self.connection)
-            .await?;
+        // Use a single connection and transaction for the SQL file execution
+        let mut conn = self
+            .connection
+            .acquire()
+            .await
+            .map_err(BridgeError::DatabaseError)?;
+        let mut tx = conn.begin().await.map_err(BridgeError::DatabaseError)?;
+
+        // Split the contents by semicolon to handle multiple SQL statements
+        for statement in contents.split(';') {
+            let trimmed = statement.trim();
+            if !trimmed.is_empty() {
+                sqlx::query(trimmed)
+                    .execute(&mut *tx) // Dereference the transaction to get the mutable reference
+                    .await
+                    .map_err(BridgeError::DatabaseError)?;
+            }
+        }
+
+        tx.commit().await.map_err(BridgeError::DatabaseError)?;
 
         Ok(())
     }
 
     /// Starts a database transaction.
-    ///
-    /// Return value can be used for committing changes. If not committed,
-    /// database will rollback every operation done after that call.
-    pub async fn begin_transaction(
-        &self,
-    ) -> Result<sqlx::Transaction<'_, sqlx::Postgres>, BridgeError> {
+    /// Returns a transaction object to manage the transaction.
+    pub async fn begin_transaction(&self) -> Result<sqlx::Transaction<'_, Sqlite>, BridgeError> {
         match self.connection.begin().await {
             Ok(t) => Ok(t),
             Err(e) => Err(BridgeError::DatabaseError(e)),
@@ -143,21 +113,23 @@ impl Database {
             .trim_matches('"')
             .to_owned();
 
-        sqlx::query("INSERT INTO new_deposit_requests (start_utxo, recovery_taproot_address, evm_address) VALUES ($1, $2, $3);")
-            .bind(start_utxo)
-            .bind(recovery_taproot_address)
-            .bind(evm_address)
-            .fetch_all(&self.connection)
-            .await?;
+        sqlx::query("INSERT INTO new_deposit_requests (start_utxo, recovery_taproot_address, evm_address) VALUES (?1, ?2, ?3);")
+        .bind(start_utxo)
+        .bind(recovery_taproot_address)
+        .bind(evm_address)
+        .execute(&self.connection)
+        .await
+        .map_err(BridgeError::DatabaseError)?;
 
         Ok(())
     }
 
     pub async fn get_deposit_tx(&self, idx: usize) -> Result<Txid, BridgeError> {
-        let qr: (String,) = sqlx::query_as("SELECT move_txid FROM deposit_move_txs WHERE id = $1;")
+        let qr: (String,) = sqlx::query_as("SELECT move_txid FROM deposit_move_txs WHERE id = ?;")
             .bind(idx as i64)
             .fetch_one(&self.connection)
-            .await?;
+            .await
+            .map_err(BridgeError::DatabaseError)?;
 
         match Txid::from_str(qr.0.as_str()) {
             Ok(c) => Ok(c),
@@ -168,7 +140,8 @@ impl Database {
     pub async fn get_next_deposit_index(&self) -> Result<usize, BridgeError> {
         let qr: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM deposit_move_txs;")
             .fetch_one(&self.connection)
-            .await?;
+            .await
+            .map_err(BridgeError::DatabaseError)?;
 
         Ok(qr.0 as usize)
     }
@@ -180,13 +153,14 @@ impl Database {
         evm_address: EVMAddress,
         move_txid: Txid,
     ) -> Result<(), BridgeError> {
-        sqlx::query("INSERT INTO deposit_move_txs (start_utxo, recovery_taproot_address, evm_address, move_txid) VALUES ($1, $2, $3, $4);")
-            .bind(start_utxo.to_string())
-            .bind(serde_json::to_string(&recovery_taproot_address).unwrap().trim_matches('"'))
-            .bind(serde_json::to_string(&evm_address).unwrap().trim_matches('"'))
-            .bind(move_txid.to_string())
-            .fetch_all(&self.connection)
-            .await?;
+        sqlx::query("INSERT INTO deposit_move_txs (start_utxo, recovery_taproot_address, evm_address, move_txid) VALUES (?1, ?2, ?3, ?4);")
+        .bind(start_utxo.to_string())
+        .bind(serde_json::to_string(&recovery_taproot_address).unwrap().trim_matches('"'))
+        .bind(serde_json::to_string(&evm_address).unwrap().trim_matches('"'))
+        .bind(move_txid.to_string())
+        .execute(&self.connection)
+        .await
+        .map_err(BridgeError::DatabaseError)?;
 
         Ok(())
     }
@@ -197,12 +171,13 @@ impl Database {
         recovery_taproot_address: Address<NetworkUnchecked>,
         evm_address: EVMAddress,
     ) -> Result<Txid, BridgeError> {
-        let qr: (String,) = sqlx::query_as("SELECT (move_txid) FROM deposit_move_txs WHERE start_utxo = $1 AND recovery_taproot_address = $2 AND evm_address = $3;")
-            .bind(start_utxo.to_string())
-            .bind(serde_json::to_string(&recovery_taproot_address).unwrap().trim_matches('"'))
-            .bind(serde_json::to_string(&evm_address).unwrap().trim_matches('"'))
-            .fetch_one(&self.connection)
-            .await?;
+        let qr: (String,) = sqlx::query_as("SELECT move_txid FROM deposit_move_txs WHERE start_utxo = ? AND recovery_taproot_address = ? AND evm_address = ?;")
+        .bind(start_utxo.to_string())
+        .bind(serde_json::to_string(&recovery_taproot_address).unwrap().trim_matches('"'))
+        .bind(serde_json::to_string(&evm_address).unwrap().trim_matches('"'))
+        .fetch_one(&self.connection)
+        .await
+        .map_err(BridgeError::DatabaseError)?;
 
         let move_txid = Txid::from_str(&qr.0).unwrap();
         Ok(move_txid)
@@ -215,13 +190,14 @@ impl Database {
         sig: secp256k1::schnorr::Signature,
     ) -> Result<(), BridgeError> {
         sqlx::query(
-            "INSERT INTO withdrawal_sigs (idx, bridge_fund_txid, sig) VALUES ($1, $2, $3);",
+            "INSERT INTO withdrawal_sigs (idx, bridge_fund_txid, sig) VALUES (?1, ?2, ?3);",
         )
         .bind(idx as i64)
         .bind(bridge_fund_txid.to_string())
         .bind(sig.to_string())
-        .fetch_all(&self.connection)
-        .await?;
+        .execute(&self.connection)
+        .await
+        .map_err(BridgeError::DatabaseError)?;
 
         Ok(())
     }
@@ -231,10 +207,11 @@ impl Database {
         idx: usize,
     ) -> Result<(Txid, secp256k1::schnorr::Signature), BridgeError> {
         let qr: (String, String) =
-            sqlx::query_as("SELECT (bridge_fund_txid, sig) FROM withdrawal_sigs WHERE idx = $1;")
+            sqlx::query_as("SELECT bridge_fund_txid, sig FROM withdrawal_sigs WHERE idx = ?;")
                 .bind(idx as i64)
                 .fetch_one(&self.connection)
-                .await?;
+                .await
+                .map_err(BridgeError::DatabaseError)?;
 
         let bridge_fund_txid = Txid::from_str(&qr.0).unwrap();
         let sig = secp256k1::schnorr::Signature::from_str(&qr.1).unwrap();
@@ -263,14 +240,21 @@ mod tests {
         config.db_password = "nonexistingpassword".to_string();
         config.db_port = 123;
 
-        Database::new(config).await.unwrap();
+        Database::new(&config.db_name).await.unwrap();
     }
 
     #[tokio::test]
     async fn valid_connection() {
-        let config = common::get_test_config("test_config.toml").unwrap();
-
-        Database::new(config).await.unwrap();
+        let handle = thread::current()
+            .name()
+            .unwrap()
+            .split(':')
+            .last()
+            .unwrap()
+            .to_owned();
+        Database::create_database_file(&handle).await.unwrap();
+        Database::new(&handle).await.unwrap();
+        Database::drop_database(&handle).await.unwrap();
     }
 
     #[tokio::test]
@@ -282,19 +266,18 @@ mod tests {
             .last()
             .unwrap()
             .to_owned();
-        let config = common::get_test_config("test_config.toml").unwrap();
-        let config = Database::create_database(config, &handle).await.unwrap();
+        Database::create_database_file(&handle).await.unwrap();
 
         // Do not save return result so that connection will drop immediately.
-        Database::new(config.clone()).await.unwrap();
+        Database::new(&handle).await.unwrap();
 
-        Database::drop_database(config, &handle).await.unwrap();
+        Database::drop_database(&handle).await.unwrap();
     }
 
     #[tokio::test]
     async fn add_deposit_transaction() {
         let config = create_test_config_with_thread_name!("test_config.toml");
-        let database = Database::new(config.clone()).await.unwrap();
+        let database = Database::new(&config.db_name).await.unwrap();
 
         let secp = Secp256k1::new();
         let xonly_public_key = XOnlyPublicKey::from_slice(&[
@@ -311,6 +294,9 @@ mod tests {
                 address.as_unchecked().clone(),
                 EVMAddress([0u8; 20]),
             )
+            .await
+            .unwrap();
+        Database::drop_database(config.db_name.as_str())
             .await
             .unwrap();
     }

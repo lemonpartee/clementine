@@ -10,7 +10,7 @@ pub struct OperatorDB {
 impl OperatorDB {
     pub async fn new(config: BridgeConfig) -> Self {
         Self {
-            database: Database::new(config).await.unwrap(),
+            database: Database::new(&config.db_name).await.unwrap(),
         }
     }
 }

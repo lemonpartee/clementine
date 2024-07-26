@@ -7,12 +7,12 @@ use clementine_core::actor::Actor;
 use clementine_core::database::common::Database;
 use clementine_core::extended_rpc::ExtendedRpc;
 use clementine_core::mock::common;
-use clementine_core::script_builder;
 use clementine_core::transaction_builder::{CreateTxOutputs, TransactionBuilder};
 use clementine_core::utils::handle_taproot_witness_new;
 use clementine_core::{
     create_extended_rpc, create_test_config, create_test_config_with_thread_name,
 };
+use clementine_core::{delete_test_db, script_builder};
 use std::thread;
 
 #[tokio::test]
@@ -122,6 +122,7 @@ async fn run() {
     //     true
     // });
     // println!("asd: {:?}", deposit_address.1.script_map().keys())
+    delete_test_db!(config.db_name);
 }
 
 fn calculate_min_relay_fee(n: u64) -> u64 {
@@ -181,6 +182,7 @@ async fn taproot_key_path_spend() {
     println!("input_count: {:?}", tx.input.len());
     println!("output_count: {:?}", tx.output.len());
     println!("vsize: {:?}", tx.vsize());
+    delete_test_db!(config.db_name);
 }
 
 #[tokio::test]
@@ -240,4 +242,5 @@ async fn taproot_key_path_spend_2() {
     let txid = rpc.send_raw_transaction(&tx).unwrap();
 
     println!("txid: {:?}", txid);
+    delete_test_db!(config.db_name);
 }

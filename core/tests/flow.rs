@@ -6,6 +6,7 @@ use bitcoin::{Address, Amount};
 use clementine_circuits::constants::BRIDGE_AMOUNT_SATS;
 use clementine_core::actor::Actor;
 use clementine_core::database::common::Database;
+use clementine_core::delete_test_db;
 use clementine_core::extended_rpc::ExtendedRpc;
 use clementine_core::mock::common;
 use clementine_core::script_builder;
@@ -90,9 +91,8 @@ async fn test_flow_1() {
 
     let withdrawal_address = Address::p2tr(&secp, xonly_pk, None, config.network);
 
-    // This index is 3 since when testing the unit tests complete first and the index=1,2 is not sane
     let withdraw_txid = operator_client
-        .new_withdrawal_direct_rpc(0, withdrawal_address.as_unchecked().clone())
+        .new_withdrawal_direct_rpc(1, withdrawal_address.as_unchecked().clone())
         .await
         .unwrap();
     tracing::debug!("Withdrawal sent to address: {:?}", withdrawal_address);
@@ -113,6 +113,11 @@ async fn test_flow_1() {
     let expected_withdraw_amount = Amount::from_sat(BRIDGE_AMOUNT_SATS - 2 * config.min_relay_fee)
         - anyone_can_spend_amount * 2;
     assert_eq!(expected_withdraw_amount, rpc_withdraw_amount);
+
+    delete_test_db!(handle.clone());
+    for i in 0..4 {
+        delete_test_db!(handle.clone() + i.to_string().as_str());
+    }
 }
 
 #[tokio::test]
@@ -219,4 +224,9 @@ async fn test_flow_2() {
         .get_raw_transaction(&user_takes_back_txid, None)
         .unwrap();
     tracing::debug!("User takes back tx: {:#?}", user_takes_back_tx);
+
+    delete_test_db!(handle.clone());
+    for i in 0..4 {
+        delete_test_db!(handle.clone() + i.to_string().as_str());
+    }
 }
