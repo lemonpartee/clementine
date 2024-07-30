@@ -177,6 +177,15 @@ impl TransactionBuilder {
         }
     }
 
+    pub fn create_btc_tx_with_locktime(tx_ins: Vec<TxIn>, tx_outs: Vec<TxOut>, locktime: u32) -> bitcoin::Transaction {
+        bitcoin::Transaction {
+            version: bitcoin::transaction::Version(2),
+            lock_time: absolute::LockTime::from_consensus(locktime),
+            input: tx_ins,
+            output: tx_outs,
+        }
+    }
+
     pub fn create_tx_ins(utxos: Vec<OutPoint>) -> Vec<TxIn> {
         let mut tx_ins = Vec::new();
 

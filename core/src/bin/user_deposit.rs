@@ -2,14 +2,16 @@ use bitcoin::Address;
 use clementine_circuits::constants::BRIDGE_AMOUNT_SATS;
 use clementine_core::config::BridgeConfig;
 use clementine_core::transaction_builder::TransactionBuilder;
-use clementine_core::EVMAddress;
+use clementine_core::{cli, EVMAddress};
 
 fn main() {
-    let config = BridgeConfig::new();
+    let mut 
+    config = cli::get_configuration();
 
     let secp = bitcoin::secp256k1::Secp256k1::new();
     let (xonly_pk, _) = config.secret_key.public_key(&secp).x_only_public_key();
     let address = Address::p2tr(&secp, xonly_pk, None, config.network);
+    println!("config: {:?}", config);
     let tx_builder = TransactionBuilder::new(config.verifiers_public_keys.clone(), config.network);
     let evm_address: EVMAddress = EVMAddress([1u8; 20]);
     let deposit_address = tx_builder
