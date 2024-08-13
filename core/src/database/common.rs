@@ -13,6 +13,8 @@ use sqlx::{Pool, Postgres};
 use std::fs;
 use std::str::FromStr;
 
+use super::wrapper::{AddressDB, EVMAddressDB, OutPointDB, PsbtOutPointDB, SignatureDB, TxidDB};
+
 #[derive(Clone, Debug)]
 pub struct Database {
     connection: Pool<Postgres>,
@@ -134,36 +136,22 @@ impl Database {
         recovery_taproot_address: Address<NetworkUnchecked>,
         evm_address: EVMAddress,
     ) -> Result<(), BridgeError> {
-        let start_utxo = start_utxo.to_string();
-        let recovery_taproot_address = serde_json::to_string(&recovery_taproot_address)
-            .unwrap()
-            .trim_matches('"')
-            .to_owned();
-        let evm_address = serde_json::to_string(&evm_address)
-            .unwrap()
-            .trim_matches('"')
-            .to_owned();
-
         sqlx::query("INSERT INTO new_deposit_requests (start_utxo, recovery_taproot_address, evm_address) VALUES ($1, $2, $3);")
-            .bind(start_utxo)
-            .bind(recovery_taproot_address)
-            .bind(evm_address)
-            .fetch_all(&self.connection)
+            .bind(OutPointDB(start_utxo))
+            .bind(AddressDB(recovery_taproot_address))
+            .bind(EVMAddressDB(evm_address))
+            .execute(&self.connection)
             .await?;
 
         Ok(())
     }
 
     pub async fn get_deposit_tx(&self, idx: usize) -> Result<Txid, BridgeError> {
-        let qr: (String,) = sqlx::query_as("SELECT move_txid FROM deposit_move_txs WHERE id = $1;")
+        let qr: (TxidDB,) = sqlx::query_as("SELECT move_txid FROM deposit_move_txs WHERE id = $1;")
             .bind(idx as i64)
             .fetch_one(&self.connection)
             .await?;
-
-        match Txid::from_str(qr.0.as_str()) {
-            Ok(c) => Ok(c),
-            Err(e) => Err(BridgeError::DatabaseError(sqlx::Error::Decode(Box::new(e)))),
-        }
+        Ok(qr.0 .0)
     }
 
     pub async fn get_next_deposit_index(&self) -> Result<usize, BridgeError> {
@@ -198,15 +186,13 @@ impl Database {
         recovery_taproot_address: Address<NetworkUnchecked>,
         evm_address: EVMAddress,
     ) -> Result<Txid, BridgeError> {
-        let qr: (String,) = sqlx::query_as("SELECT (move_txid) FROM deposit_move_txs WHERE start_utxo = $1 AND recovery_taproot_address = $2 AND evm_address = $3;")
-            .bind(start_utxo.to_string())
-            .bind(serde_json::to_string(&recovery_taproot_address).unwrap().trim_matches('"'))
-            .bind(serde_json::to_string(&evm_address).unwrap().trim_matches('"'))
+        let qr: (TxidDB,) = sqlx::query_as("SELECT (move_txid) FROM deposit_move_txs WHERE start_utxo = $1 AND recovery_taproot_address = $2 AND evm_address = $3;")
+            .bind(OutPointDB(start_utxo))
+            .bind(AddressDB(recovery_taproot_address))
+            .bind(EVMAddressDB(evm_address))
             .fetch_one(&self.connection)
             .await?;
-
-        let move_txid = Txid::from_str(&qr.0).unwrap();
-        Ok(move_txid)
+        Ok(qr.0 .0)
     }
 
     pub async fn save_withdrawal_sig(
@@ -219,8 +205,8 @@ impl Database {
             "INSERT INTO withdrawal_sigs (idx, bridge_fund_txid, sig) VALUES ($1, $2, $3);",
         )
         .bind(idx as i64)
-        .bind(bridge_fund_txid.to_string())
-        .bind(sig.to_string())
+        .bind(TxidDB(bridge_fund_txid))
+        .bind(SignatureDB(sig))
         .fetch_all(&self.connection)
         .await?;
 
@@ -231,29 +217,31 @@ impl Database {
         &self,
         idx: usize,
     ) -> Result<(Txid, secp256k1::schnorr::Signature), BridgeError> {
-        let qr: (String, String) =
-            sqlx::query_as("SELECT bridge_fund_txid, sig FROM withdrawal_sigs WHERE idx = $1;")
+        let qr: (TxidDB, SignatureDB) =
+            sqlx::query_as("SELECT (bridge_fund_txid, sig) FROM withdrawal_sigs WHERE idx = $1;")
                 .bind(idx as i64)
                 .fetch_one(&self.connection)
                 .await?;
 
-        let bridge_fund_txid = Txid::from_str(&qr.0).unwrap();
-        let sig = secp256k1::schnorr::Signature::from_str(&qr.1).unwrap();
-        Ok((bridge_fund_txid, sig))
+        Ok((qr.0.0, qr.1.0))
     }
 
     pub async fn get_kickoff_utxo(
         &self,
         deposit_utxo: &OutPoint,
     ) -> Result<Option<PsbtOutPoint>, BridgeError> {
-        unimplemented!();
+        let qr: (PsbtOutPointDB,) = sqlx::query_as("SELECT (kickoff_tx_with_out) FROM deposit_utxos_records WHERE deposit_utxo = $1;")
+            .bind(OutPointDB(*deposit_utxo))
+            .fetch_one(&self.connection)
+            .await?;
+        Ok(Some(qr.0.0))
     }
 
     pub async fn get_kickoff_outpoints_and_amounts(
         &self,
         deposit_utxo: &OutPoint,
     ) -> Result<Option<Vec<(OutPoint, Amount)>>, BridgeError> {
-        unimplemented!();
+        let qr: (Ps)
     }
 
     pub async fn get_funding_utxo_and_amount(

@@ -40,7 +40,7 @@ pub type WithdrawalPayment = (Txid, HashType);
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct PsbtOutPoint {
-    /// The referenced transaction's txid.
+    /// The referenced transaction.
     pub tx: bitcoin::Transaction,
     /// The index of the referenced output in its transaction's vout.
     pub vout: u32,

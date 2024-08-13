@@ -27,4 +27,19 @@ create table withdrawal_sigs (
     created_at timestamp not null default now()
 );
 
+create table funding_utxos_and_amounts (
+    funding_utxo text not null,
+    amount bigint not null,
+    created_at timestamp not null default now()
+);
+
+create table deposit_utxos_records (
+    deposit_utxo text not null primary key,
+    kickoff_tx_with_out text not null,
+    kickoff_txid text not null,
+    created_at timestamp not null default now()
+);
+
+create table 
+
 commit;
